@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Redington — Client & Quotation Ledger</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  :root{
+    --bg: #0F1420;
+    --surface: #171E2E;
+    --surface-2: #1E2740;
+    --line: #2A3450;
+    --text: #E7E9EE;
+    --muted: #8A93A6;
+    --amber: #E63946;
+    --teal: #4FD1C5;
+    --red: #E8615D;
+    --font-display: 'Space Grotesk', sans-serif;
+    --font-body: 'Inter', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--bg); color:var(--text); font-family:var(--font-body);
+    min-height:100vh; -webkit-font-smoothing:antialiased;
+  }
+  ::selection{ background:var(--amber); color:#151515; }
+
+  /* ---------- Login ---------- */
+  #loginScreen{
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:
+      radial-gradient(circle at 20% 20%, rgba(230,57,70,0.10), transparent 40%),
+      radial-gradient(circle at 80% 80%, rgba(79,209,197,0.08), transparent 40%),
+      var(--bg);
+    z-index:100;
+  }
+  .login-card{
+    width:380px; background:var(--surface); border:1px solid var(--line);
+    border-radius:14px; padding:38px 34px; box-shadow:0 30px 60px rgba(0,0,0,0.45);
+  }
+  .login-eyebrow{
+    font-family:var(--font-mono); font-size:11px; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--amber); margin-bottom:10px;
+  }
+  .redington-mark{
+    font-family:var(--font-display); font-weight:700; font-size:13px; letter-spacing:0.06em;
+    color:var(--amber); text-transform:uppercase; margin-bottom:18px; display:flex; align-items:center; gap:8px;
+  }
+  .redington-mark .sq{ width:10px; height:10px; background:var(--amber); border-radius:2px; display:inline-block; }
+  .login-card h1{
+    font-family:var(--font-display); font-size:26px; font-weight:600; margin-bottom:6px; letter-spacing:-0.01em;
+  }
+  .login-card p.sub{ color:var(--muted); font-size:13.5px; margin-bottom:26px; line-height:1.5; }
+  .field{ margin-bottom:16px; }
+  .field label{ display:block; font-size:12px; color:var(--muted); margin-bottom:6px; font-weight:500; }
+  .field input{
+    width:100%; padding:11px 13px; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:8px; color:var(--text); font-size:14px; font-family:var(--font-body);
+  }
+  .field input:focus{ outline:none; border-color:var(--amber); }
+  #loginBtn{
+    width:100%; padding:12px; margin-top:8px; background:var(--amber); color:#1a1200;
+    border:none; border-radius:8px; font-weight:600; font-size:14px; cursor:pointer;
+    font-family:var(--font-body); transition:filter 0.15s;
+  }
+  #loginBtn:hover{ filter:brightness(1.08); }
+  #loginError{ color:var(--red); font-size:12.5px; margin-top:12px; display:none; }
+  .login-hint{ margin-top:20px; padding-top:16px; border-top:1px solid var(--line); font-size:11.5px; color:var(--muted); font-family:var(--font-mono); line-height:1.6;}
+
+  /* ---------- App shell ---------- */
+  #app{ display:none; min-height:100vh; }
+  header.topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:20px 32px; border-bottom:1px solid var(--line); background:var(--surface);
+  }
+  .brand{ display:flex; align-items:center; gap:12px; }
+  .brand .mark{
+    width:34px; height:34px; border-radius:8px; background:linear-gradient(135deg, var(--amber), #8C1622);
+    display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:700; color:#1a1200; font-size:15px;
+  }
+  .brand h2{ font-family:var(--font-display); font-size:17px; font-weight:600; }
+  .brand span.tag{ font-family:var(--font-mono); font-size:11px; color:var(--muted); }
+  .top-actions{ display:flex; gap:10px; align-items:center; }
+  .btn{
+    padding:9px 15px; border-radius:8px; border:1px solid var(--line); background:var(--surface-2);
+    color:var(--text); font-size:13px; font-weight:500; cursor:pointer; font-family:var(--font-body);
+    display:flex; align-items:center; gap:7px; transition:border-color 0.15s, background 0.15s;
+  }
+  .btn:hover{ border-color:var(--amber); }
+  .btn.primary{ background:var(--amber); color:#1a1200; border-color:var(--amber); font-weight:600;}
+  .btn.primary:hover{ filter:brightness(1.07); }
+  .btn.ghost{ background:transparent; }
+  #fileInput{ display:none; }
+
+  main{ padding:28px 32px; max-width:1400px; margin:0 auto; }
+
+  /* Summary cards */
+  .stats-row{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:26px; }
+  .stat-card{
+    background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px 20px;
+    position:relative; overflow:hidden;
+  }
+  .stat-card .eyebrow{ font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:0.1em; color:var(--muted); margin-bottom:10px;}
+  .stat-card .value{ font-family:var(--font-mono); font-size:26px; font-weight:600; letter-spacing:-0.01em; }
+  .stat-card.accent-amber .value{ color:var(--amber); }
+  .stat-card.accent-teal .value{ color:var(--teal); }
+
+  /* Pipeline meter (signature element) */
+  .pipeline-panel{
+    background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:20px 22px; margin-bottom:26px;
+  }
+  .pipeline-panel .head{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:14px; }
+  .pipeline-panel h3{ font-family:var(--font-display); font-size:14.5px; font-weight:600; }
+  .pipeline-panel .head span{ font-family:var(--font-mono); font-size:11.5px; color:var(--muted); }
+  .meter{ display:flex; height:14px; border-radius:7px; overflow:hidden; background:var(--surface-2); }
+  .meter div{ height:100%; }
+  .legend{ display:flex; flex-wrap:wrap; gap:14px; margin-top:12px; }
+  .legend .item{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); font-family:var(--font-mono); }
+  .legend .dot{ width:9px; height:9px; border-radius:2px; }
+
+  /* Table panel */
+  .panel{
+    background:var(--surface); border:1px solid var(--line); border-radius:12px; overflow:hidden;
+  }
+  .panel-head{
+    display:flex; justify-content:space-between; align-items:center; padding:18px 20px; border-bottom:1px solid var(--line);
+    flex-wrap:wrap; gap:10px;
+  }
+  .panel-head h3{ font-family:var(--font-display); font-size:15px; font-weight:600; }
+  .panel-head .filters{ display:flex; gap:10px; flex-wrap:wrap; }
+  .search-box{
+    background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:8px 12px;
+    font-size:13px; color:var(--text); width:230px; font-family:var(--font-body);
+  }
+  .search-box:focus{ outline:none; border-color:var(--amber); }
+  select.status-filter{
+    background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:8px 12px;
+    font-size:13px; color:var(--text); font-family:var(--font-body); cursor:pointer;
+  }
+  select.status-filter:focus{ outline:none; border-color:var(--amber); }
+
+  .status-chips{ display:flex; gap:10px; flex-wrap:wrap; padding:14px 20px; border-bottom:1px solid var(--line); }
+  .status-chip{
+    font-family:var(--font-mono); font-size:11.5px; padding:5px 10px; border-radius:20px;
+    border:1px solid var(--line); color:var(--muted); cursor:pointer; transition:border-color .15s, color .15s;
+  }
+  .status-chip.active{ border-color:var(--amber); color:var(--amber); }
+
+  .badge{
+    display:inline-block; padding:3px 10px; border-radius:20px; font-size:11.5px; font-family:var(--font-mono);
+    font-weight:500; white-space:nowrap;
+  }
+  .badge-pending{ background:rgba(232,163,61,0.15); color:var(--amber); }
+  .badge-confirmed{ background:rgba(79,209,197,0.15); color:var(--teal); }
+  .badge-notconfirmed{ background:rgba(232,97,93,0.12); color:var(--red); }
+  .badge-po{ background:rgba(143,124,232,0.18); color:#B5A6F5; }
+  .badge-cancelled{ background:rgba(138,147,166,0.15); color:var(--muted); text-decoration:line-through; }
+  .filters{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .status-filter{
+    background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:8px 12px;
+    font-size:13px; color:var(--text); font-family:var(--font-body); cursor:pointer;
+  }
+  .status-filter:focus{ outline:none; border-color:var(--amber); }
+  .status-badge{
+    display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:20px;
+    font-size:11.5px; font-weight:600; font-family:var(--font-mono); white-space:nowrap;
+  }
+  .status-badge .dot{ width:7px; height:7px; border-radius:50%; }
+  .note-cell{ color:var(--muted); font-size:12.5px; max-width:160px; }
+
+  table{ width:100%; border-collapse:collapse; }
+  thead th{
+    text-align:left; font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:0.08em;
+    color:var(--muted); padding:12px 20px; border-bottom:1px solid var(--line); font-weight:500;
+  }
+  tbody td{
+    padding:13px 20px; border-bottom:1px solid var(--line); font-size:13.5px;
+  }
+  tbody tr:hover{ background:rgba(230,57,70,0.05); }
+  tbody tr:last-child td{ border-bottom:none; }
+  td.value-cell{ font-family:var(--font-mono); color:var(--amber); font-weight:500; }
+  td.actions{ text-align:right; }
+  td.actions button{
+    background:none; border:none; color:var(--muted); cursor:pointer; font-size:13px; padding:4px 6px;
+  }
+  td.actions button:hover{ color:var(--red); }
+  .empty-state{ padding:60px 20px; text-align:center; color:var(--muted); }
+  .empty-state .icon{ font-size:32px; margin-bottom:10px; }
+  .empty-state p{ font-size:13.5px; max-width:340px; margin:6px auto 0; line-height:1.5; }
+
+  /* Add row form */
+  #addRowForm{
+    display:none; padding:16px 20px; border-bottom:1px solid var(--line); background:var(--surface-2);
+    grid-template-columns:1.1fr 1fr 1fr 0.8fr 1fr 0.8fr 0.9fr 1fr auto; gap:10px; align-items:end;
+  }
+  #addRowForm.show{ display:grid; }
+  #addRowForm .f{ display:flex; flex-direction:column; gap:5px; }
+  #addRowForm label{ font-size:10.5px; color:var(--muted); font-family:var(--font-mono); text-transform:uppercase; letter-spacing:0.06em;}
+  #addRowForm input, #addRowForm select{
+    padding:8px 10px; background:var(--bg); border:1px solid var(--line); border-radius:6px; color:var(--text); font-size:13px;
+    font-family:var(--font-body);
+  }
+  #addRowForm input:focus, #addRowForm select:focus{ outline:none; border-color:var(--amber); }
+
+  /* Status pills row */
+  .status-pills{ display:flex; gap:12px; margin-bottom:26px; flex-wrap:wrap; }
+  .status-pill{
+    flex:1; min-width:140px; background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    padding:14px 16px; cursor:pointer; transition:border-color 0.15s;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .status-pill:hover{ border-color:var(--amber); }
+  .status-pill.active{ border-color:var(--amber); background:var(--surface-2); }
+  .status-pill .label{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--muted); }
+  .status-pill .dot{ width:8px; height:8px; border-radius:50%; }
+  .status-pill .count{ font-family:var(--font-mono); font-size:18px; font-weight:600; }
+
+  footer.foot{ text-align:center; padding:26px; color:var(--muted); font-size:11.5px; font-family:var(--font-mono); }
+
+  /* Admin modal */
+  .modal-overlay{
+    display:none; position:fixed; inset:0; background:rgba(6,9,16,0.72); z-index:200;
+    align-items:center; justify-content:center;
+  }
+  .modal-overlay.show{ display:flex; }
+  .modal-card{
+    width:420px; max-height:82vh; overflow-y:auto; background:var(--surface); border:1px solid var(--line);
+    border-radius:14px; box-shadow:0 30px 60px rgba(0,0,0,0.5);
+  }
+  .modal-head{
+    display:flex; justify-content:space-between; align-items:center; padding:18px 22px; border-bottom:1px solid var(--line);
+  }
+  .modal-head h3{ font-family:var(--font-display); font-size:16px; font-weight:600; }
+  .modal-head button{ background:none; border:none; color:var(--muted); font-size:16px; cursor:pointer; }
+  .modal-head button:hover{ color:var(--red); }
+  .modal-body{ padding:20px 22px; }
+  .modal-note{ padding:14px 22px 20px; font-size:11.5px; color:var(--muted); font-family:var(--font-mono); line-height:1.6; border-top:1px solid var(--line); }
+  .account-row{
+    display:flex; align-items:center; justify-content:space-between; padding:10px 12px; margin-top:8px;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:8px;
+  }
+  .account-row .who{ display:flex; flex-direction:column; gap:2px; }
+  .account-row .who strong{ font-size:13px; }
+  .account-row .who span{ font-size:11.5px; color:var(--muted); font-family:var(--font-mono); }
+  .account-row button{ background:none; border:none; color:var(--muted); cursor:pointer; font-size:13px; }
+  .account-row button:hover{ color:var(--red); }
+  .role-tag{
+    font-family:var(--font-mono); font-size:10px; padding:2px 8px; border-radius:10px; text-transform:uppercase;
+    background:rgba(230,57,70,0.15); color:var(--amber); margin-left:8px;
+  }
+
+  /* Clickable top stat cards */
+  .stat-card.clickable{ cursor:pointer; transition:border-color .15s; }
+  .stat-card.clickable:hover{ border-color:var(--amber); }
+  .stat-card.clickable.active-filter{ border-color:var(--amber); background:var(--surface-2); }
+
+  @media (max-width: 900px){
+    .stats-row{ grid-template-columns:repeat(2,1fr); }
+    #addRowForm{ grid-template-columns:1fr 1fr; }
+    header.topbar{ flex-direction:column; align-items:flex-start; gap:12px; }
+    main{ padding:20px; }
+    table{ font-size:12px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen">
+  <div class="login-card">
+    <div class="redington-mark"><span class="sq"></span>Redington</div>
+    <div class="login-eyebrow">Access · Restricted</div>
+    <h1>Client & Quotation Ledger</h1>
+    <p class="sub">Sign in to view live quotation pipeline, client accounts, and PAM assignments.</p>
+    <div class="field">
+      <label>Email</label>
+      <input type="email" id="username" placeholder="you@redington.com" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="password" placeholder="Enter password" autocomplete="off">
+    </div>
+    <button id="loginBtn">Sign in</button>
+    <div id="loginError">Incorrect email or password. Try again.</div>
+    <div class="login-hint">Accounts are created by an admin from the "Manage team" panel after signing in. See supabase-schema.sql for how to set up the very first admin account.</div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <!-- To use the real Redington logo: replace the div below with
+           <img src="logo.png" alt="Redington" style="height:34px;width:auto;"> 
+           and place your logo.png file next to this index.html before deploying. -->
+      <div class="mark" id="brandMark">R</div>
+      <div>
+        <h2>Redington <span style="color:var(--amber)">|</span> Client Ledger</h2>
+        <span class="tag">quotation & pipeline tracker</span>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span id="whoAmI" style="font-size:12.5px; color:var(--muted); font-family:var(--font-mono); margin-right:6px;"></span>
+      <button class="btn ghost" id="addRowBtn">+ Add row</button>
+      <button class="btn ghost" id="adminBtn" style="display:none;">👤 Manage team</button>
+      <button class="btn" id="uploadBtn">↑ Upload Excel</button>
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+      <button class="btn primary" id="exportBtn">↓ Export Excel</button>
+      <button class="btn ghost" id="logoutBtn">Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="stats-row">
+      <div class="stat-card clickable" id="cardPending" onclick="setTopFilter('pending')">
+        <div class="eyebrow">Pending</div>
+        <div class="value" id="statOpen">0</div>
+      </div>
+      <div class="stat-card clickable accent-teal" id="cardConfirmed" onclick="setTopFilter('confirmed')">
+        <div class="eyebrow">Confirmed</div>
+        <div class="value" id="statConfirmed">0</div>
+      </div>
+      <div class="stat-card clickable" id="cardClosed" onclick="setTopFilter('closed')">
+        <div class="eyebrow">Closed</div>
+        <div class="value" id="statClosed">0</div>
+      </div>
+      <div class="stat-card clickable accent-amber" id="cardAll" onclick="setTopFilter('')">
+        <div class="eyebrow">Total value — all reps</div>
+        <div class="value" id="statTotalValue">SAR 0</div>
+      </div>
+    </div>
+
+    <div class="stat-card" id="repTotalCard" style="margin-bottom:26px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px;">
+      <div>
+        <div class="eyebrow">Total per sales rep</div>
+        <select class="status-filter" id="repFilter" style="margin-top:6px;">
+          <option value="">All reps</option>
+        </select>
+      </div>
+      <div style="text-align:right;">
+        <div class="eyebrow">Total for selected rep</div>
+        <div class="value" id="statRepTotal" style="color:var(--teal)">SAR 0</div>
+      </div>
+    </div>
+
+    <div class="status-pills" id="statusPills"></div>
+
+    <div class="pipeline-panel" id="pipelinePanel">
+      <div class="head">
+        <h3>Pipeline value by sales rep</h3>
+        <span id="pipelineSpan">—</span>
+      </div>
+      <div class="meter" id="meterBar"></div>
+      <div class="legend" id="meterLegend"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Quotations</h3>
+        <div class="filters">
+          <select class="status-filter" id="statusFilter">
+            <option value="">All statuses</option>
+          </select>
+          <input type="text" class="search-box" id="searchBox" placeholder="Search company, product, rep, PAM...">
+        </div>
+      </div>
+
+      <div id="addRowForm">
+        <div class="f"><label>Sales rep</label><input id="in_rep" placeholder="e.g. Abdulrahman"></div>
+        <div class="f"><label>Company</label><input id="in_company" placeholder="Client company"></div>
+        <div class="f"><label>Product</label><input id="in_product" placeholder="e.g. Fortinet FG-60F"></div>
+        <div class="f"><label>Value (SAR)</label><input id="in_value" type="number" placeholder="0"></div>
+        <div class="f"><label>PAM</label><input id="in_pam" placeholder="Account manager"></div>
+        <div class="f"><label>Date</label><input id="in_date" type="date"></div>
+        <div class="f"><label>Status</label>
+          <select id="in_status"></select>
+        </div>
+        <div class="f"><label>Note / Reason</label><input id="in_note" placeholder="e.g. cancellation reason"></div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn primary" id="saveRowBtn">Add</button>
+          <button class="btn ghost" id="cancelRowBtn">Cancel</button>
+        </div>
+      </div>
+
+      <div id="tableWrap"></div>
+    </div>
+  </main>
+
+  <footer class="foot">Data is stored permanently in Supabase — shared live across every teammate and device</footer>
+</div>
+
+<!-- ADMIN MODAL -->
+<div id="adminModal" class="modal-overlay">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>Manage team accounts</h3>
+      <button id="closeAdminModal">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field"><label>Display name</label><input id="new_name" placeholder="e.g. Faisal Al-Qahtani"></div>
+      <div class="field"><label>Email</label><input id="new_username" type="email" placeholder="e.g. faisal@redington.com"></div>
+      <div class="field"><label>Password</label><input id="new_password" type="text" placeholder="Set a password (min 6 characters)"></div>
+      <div class="field"><label>Role</label>
+        <select id="new_role">
+          <option value="member">Sales rep / member</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="field" id="new_repname_wrap">
+        <label>Linked sales rep name (must match "Sales rep" spelling used in the ledger)</label>
+        <input id="new_repname" placeholder="e.g. Abdulrahman">
+      </div>
+      <button class="btn primary" id="addAccountBtn" style="width:100%;">+ Add account</button>
+      <div id="accountsList"></div>
+    </div>
+    <div class="modal-note">Sales rep / member accounts only see their own rows and their own totals — everyone can see the company-wide total value. Admin accounts see and control everything. Accounts and quotations are now stored permanently in Supabase and are the same for every device and every teammate.</div>
+  </div>
+</div>
+
+<script>
+
+/* ===================== SUPABASE CONFIG ===================== */
+// Fill these in with your own project's values:
+// Supabase dashboard → Settings → API → Project URL / anon public key.
+// The anon key is safe to expose in client-side code — it only ever
+// works within the limits of the Row Level Security policies in
+// supabase-schema.sql.
+const SUPABASE_URL = "https://oiqnkyjlkidcafqsoyfc.supabase.co/rest/v1/";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pcW5reWpsa2lkY2FmcXNveWZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM0OTg3MzMsImV4cCI6MjA5OTA3NDczM30.0oArElrqQ3XgiAqe7Eame1aqxbbHHvyh-1lMiBgzgtM";
+
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ===================== AUTH ===================== */
+let currentAccount = null; // { id, name, role, repName }
+
+document.getElementById('loginBtn').addEventListener('click', attemptLogin);
+document.getElementById('password').addEventListener('keydown', e => { if(e.key === 'Enter') attemptLogin(); });
+document.getElementById('username').addEventListener('keydown', e => { if(e.key === 'Enter') attemptLogin(); });
+
+async function attemptLogin(){
+  const email = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  document.getElementById('loginError').style.display = 'none';
+
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if(error || !data.session){
+    document.getElementById('loginError').textContent = error ? error.message : 'Incorrect email or password. Try again.';
+    document.getElementById('loginError').style.display = 'block';
+    return;
+  }
+  await establishSession(data.session);
+}
+
+async function establishSession(session){
+  const { data: profile, error: profileErr } = await supabaseClient
+    .from('profiles')
+    .select('*')
+    .eq('id', session.user.id)
+    .single();
+
+  if(profileErr || !profile){
+    document.getElementById('loginError').textContent = 'Signed in, but no profile is set up for this account yet. Ask an admin to add one.';
+    document.getElementById('loginError').style.display = 'block';
+    await supabaseClient.auth.signOut();
+    return;
+  }
+
+  currentAccount = {
+    id: profile.id,
+    name: profile.name,
+    role: profile.role,
+    repName: profile.rep_name || ''
+  };
+
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  const isAdmin = currentAccount.role === 'admin';
+  document.getElementById('adminBtn').style.display = isAdmin ? 'flex' : 'none';
+  document.getElementById('uploadBtn').style.display = isAdmin ? 'flex' : 'none';
+  document.getElementById('repTotalCard').style.display = isAdmin ? 'flex' : 'none';
+  document.getElementById('pipelinePanel').style.display = isAdmin ? 'block' : 'none';
+  document.getElementById('whoAmI').textContent =
+    `${currentAccount.name} · ${currentAccount.role}${currentAccount.repName ? ' · ' + currentAccount.repName : ''}`;
+  applyRepLock();
+
+  await fetchRows();
+  await refreshCompanyTotal();
+  subscribeRealtime();
+  render();
+}
+
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  await supabaseClient.auth.signOut();
+  unsubscribeRealtime();
+  currentAccount = null;
+  rows = [];
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('password').value = '';
+  document.getElementById('whoAmI').textContent = '';
+});
+
+// If a session already exists (page refresh, same browser), resume it automatically.
+(async () => {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(session){
+    await establishSession(session);
+  }
+})();
+
+/* ===================== ADMIN: MANAGE TEAM ACCOUNTS ===================== */
+const adminModal = document.getElementById('adminModal');
+document.getElementById('adminBtn').addEventListener('click', () => {
+  adminModal.classList.add('show');
+  renderAccountsList();
+});
+document.getElementById('closeAdminModal').addEventListener('click', () => {
+  adminModal.classList.remove('show');
+});
+
+document.getElementById('new_role').addEventListener('change', toggleRepNameField);
+function toggleRepNameField(){
+  const role = document.getElementById('new_role').value;
+  document.getElementById('new_repname_wrap').style.display = (role === 'member') ? 'block' : 'none';
+}
+toggleRepNameField();
+
+document.getElementById('addAccountBtn').addEventListener('click', async () => {
+  const name = document.getElementById('new_name').value.trim();
+  const email = document.getElementById('new_username').value.trim();
+  const password = document.getElementById('new_password').value.trim();
+  const role = document.getElementById('new_role').value;
+  const repName = document.getElementById('new_repname').value.trim();
+
+  if(!name || !email || !password){ alert('Fill in display name, email, and password.'); return; }
+  if(role === 'member' && !repName){ alert('For a sales rep / member account, enter the linked sales rep name — it must match the "Sales rep" spelling used in the ledger rows.'); return; }
+
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(!session){ alert('Your session expired. Please sign in again.'); return; }
+
+  const res = await fetch('/api/create-user', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      accessToken: session.access_token,
+      name, email, password, role,
+      repName: role === 'member' ? repName : ''
+    })
+  });
+  const result = await res.json();
+  if(!res.ok){ alert('Could not create account: ' + result.error); return; }
+
+  ['new_name','new_username','new_password','new_repname'].forEach(id => document.getElementById(id).value = '');
+  renderAccountsList();
+});
+
+async function renderAccountsList(){
+  const wrap = document.getElementById('accountsList');
+  wrap.innerHTML = '<div style="color:var(--muted);font-size:12.5px;">Loading…</div>';
+
+  const { data: profiles, error } = await supabaseClient.from('profiles').select('*').order('created_at');
+  if(error){
+    wrap.innerHTML = `<div style="color:var(--red);font-size:12.5px;">Could not load accounts: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  wrap.innerHTML = profiles.map(a => `
+    <div class="account-row">
+      <div class="who">
+        <strong>${escapeHtml(a.name)} <span class="role-tag">${a.role}</span></strong>
+        <span>${escapeHtml(a.email || '')}${a.id === currentAccount.id ? ' (you)' : ''}${a.rep_name ? ' · linked to: ' + escapeHtml(a.rep_name) : ''}</span>
+      </div>
+      ${a.id !== currentAccount.id ? `<button onclick="removeAccount('${a.id}')" title="Remove">✕</button>` : ''}
+    </div>
+  `).join('');
+}
+
+async function removeAccount(targetUserId){
+  if(!confirm('Remove this account? They will no longer be able to sign in.')) return;
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(!session){ alert('Your session expired. Please sign in again.'); return; }
+
+  const res = await fetch('/api/delete-user', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessToken: session.access_token, targetUserId })
+  });
+  const result = await res.json();
+  if(!res.ok){ alert('Could not remove account: ' + result.error); return; }
+  renderAccountsList();
+}
+
+/* ===================== DATA ===================== */
+let rows = []; // local cache of what this account is allowed to see, kept in sync with Supabase
+
+async function fetchRows(){
+  const { data, error } = await supabaseClient
+    .from('quotations')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if(error){
+    console.error(error);
+    rows = [];
+    return;
+  }
+  rows = data.map(r => ({
+    id: r.id,
+    rep: r.rep,
+    company: r.company,
+    product: r.product,
+    value: r.value,
+    pam: r.pam,
+    date: r.quote_date || '',
+    status: r.status,
+    note: r.note || ''
+  }));
+}
+
+// The company-wide total is fetched through a security-definer database
+// function, so every account can see the true grand total even though
+// members can only SELECT their own rows directly.
+async function refreshCompanyTotal(){
+  const { data, error } = await supabaseClient.rpc('total_pipeline_value');
+  document.getElementById('statTotalValue').textContent = fmtCurrency(error ? 0 : data);
+}
+
+let realtimeChannel = null;
+function subscribeRealtime(){
+  if(realtimeChannel) return;
+  realtimeChannel = supabaseClient
+    .channel('quotations-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'quotations' }, async () => {
+      await fetchRows();
+      await refreshCompanyTotal();
+      render();
+    })
+    .subscribe();
+}
+function unsubscribeRealtime(){
+  if(realtimeChannel){
+    supabaseClient.removeChannel(realtimeChannel);
+    realtimeChannel = null;
+  }
+}
+
+const COLORS = ["#E8A33D","#4FD1C5","#E8615D","#8E7CE8","#5FB0F0","#E89D5F"];
+
+const STATUS_OPTIONS = ["Pending","Confirmed","PO Received","Cancelled"];
+const OPEN_STATUSES = ["Pending"];
+const CLOSED_STATUSES = ["PO Received","Cancelled"];
+let topFilterType = ""; // '', 'pending', 'confirmed', 'closed'
+
+function setTopFilter(type){
+  topFilterType = (topFilterType === type) ? "" : type;
+  render();
+}
+const STATUS_COLORS = {
+  "Pending": "#E8A33D",
+  "Confirmed": "#4FD1C5",
+  "PO Received": "#5FB0F0",
+  "Cancelled": "#8A93A6"
+};
+
+// Populate the status <select> elements (filter + add-row form)
+function populateStatusSelects(){
+  const filterSel = document.getElementById('statusFilter');
+  const formSel = document.getElementById('in_status');
+  STATUS_OPTIONS.forEach(s => {
+    const o1 = document.createElement('option'); o1.value = s; o1.textContent = s;
+    filterSel.appendChild(o1);
+    const o2 = document.createElement('option'); o2.value = s; o2.textContent = s;
+    formSel.appendChild(o2);
+  });
+}
+populateStatusSelects();
+document.getElementById('statusFilter').addEventListener('change', render);
+document.getElementById('repFilter').addEventListener('change', render);
+
+let activePillStatus = "";
+
+/* ===================== RENDER ===================== */
+function fmtCurrency(n){
+  return "SAR " + Number(n||0).toLocaleString('en-US', {maximumFractionDigits:0});
+}
+
+function render(){
+  const search = document.getElementById('searchBox').value.trim().toLowerCase();
+  const statusFilterVal = document.getElementById('statusFilter').value;
+  const repFilterVal = document.getElementById('repFilter').value;
+  // `rows` is already scoped server-side by Supabase RLS: admins get every
+  // row, members only get rows where rep = their own linked rep name.
+  const filtered = rows.filter(r => {
+    const matchesSearch = !search ||
+      (r.company||'').toLowerCase().includes(search) ||
+      (r.product||'').toLowerCase().includes(search) ||
+      (r.rep||'').toLowerCase().includes(search) ||
+      (r.pam||'').toLowerCase().includes(search) ||
+      (r.note||'').toLowerCase().includes(search) ||
+      (r.status||'').toLowerCase().includes(search);
+    const matchesStatus = !statusFilterVal || r.status === statusFilterVal;
+    const matchesPill = !activePillStatus || r.status === activePillStatus;
+    const matchesRep = !repFilterVal || r.rep === repFilterVal;
+    const matchesTopFilter = !topFilterType ||
+      (topFilterType === 'pending' && OPEN_STATUSES.includes(r.status || "Pending")) ||
+      (topFilterType === 'confirmed' && r.status === 'Confirmed') ||
+      (topFilterType === 'closed' && CLOSED_STATUSES.includes(r.status || ''));
+    return matchesSearch && matchesStatus && matchesPill && matchesRep && matchesTopFilter;
+  });
+
+  // Status pills (manager quick-glance + click to filter)
+  const pillsWrap = document.getElementById('statusPills');
+  pillsWrap.innerHTML = '';
+  STATUS_OPTIONS.forEach(s => {
+    const count = rows.filter(r => r.status === s).length;
+    const pill = document.createElement('div');
+    pill.className = 'status-pill' + (activePillStatus === s ? ' active' : '');
+    pill.innerHTML = `<span class="label"><span class="dot" style="background:${STATUS_COLORS[s]}"></span>${s}</span><span class="count">${count}</span>`;
+    pill.addEventListener('click', () => {
+      activePillStatus = (activePillStatus === s) ? "" : s;
+      render();
+    });
+    pillsWrap.appendChild(pill);
+  });
+
+  // Stats — Pending / Confirmed / Closed are scoped to what this account can see.
+  // Total value is refreshed separately via refreshCompanyTotal() (company-wide for everyone).
+  const openCount = rows.filter(r => OPEN_STATUSES.includes(r.status || "Pending")).length;
+  const confirmedCount = rows.filter(r => (r.status||"") === "Confirmed").length;
+  const closedCount = rows.filter(r => CLOSED_STATUSES.includes(r.status || "")).length;
+  document.getElementById('statOpen').textContent = openCount;
+  document.getElementById('statConfirmed').textContent = confirmedCount;
+  document.getElementById('statClosed').textContent = closedCount;
+
+  document.getElementById('cardPending').classList.toggle('active-filter', topFilterType === 'pending');
+  document.getElementById('cardConfirmed').classList.toggle('active-filter', topFilterType === 'confirmed');
+  document.getElementById('cardClosed').classList.toggle('active-filter', topFilterType === 'closed');
+  document.getElementById('cardAll').classList.toggle('active-filter', topFilterType === '');
+
+  // Rep filter dropdown — admin only panel, keep in sync with the reps actually in the data
+  const repFilterSel = document.getElementById('repFilter');
+  const currentRepSelection = repFilterSel.value;
+  const uniqueReps = [...new Set(rows.map(r => r.rep).filter(Boolean))].sort();
+  repFilterSel.innerHTML = '<option value="">All reps</option>' + uniqueReps.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+  if(uniqueReps.includes(currentRepSelection)) repFilterSel.value = currentRepSelection;
+  const selectedRep = repFilterSel.value;
+  const repTotal = rows.filter(r => !selectedRep || r.rep === selectedRep)
+                        .reduce((s,r)=> s + (Number(r.value)||0), 0);
+  document.getElementById('statRepTotal').textContent = fmtCurrency(repTotal);
+
+  const repTotals = {};
+  const allValue = rows.reduce((s,r)=> s + (Number(r.value)||0), 0);
+  rows.forEach(r => { repTotals[r.rep] = (repTotals[r.rep]||0) + (Number(r.value)||0); });
+  const repEntries = Object.entries(repTotals).sort((a,b)=>b[1]-a[1]);
+
+  // Pipeline meter (admin only panel — built from whatever `rows` holds for this account)
+  document.getElementById('pipelineSpan').textContent = fmtCurrency(allValue) + " total";
+  const meterBar = document.getElementById('meterBar');
+  const legend = document.getElementById('meterLegend');
+  meterBar.innerHTML = ''; legend.innerHTML = '';
+  repEntries.forEach(([rep, val], i) => {
+    const pct = allValue ? (val/allValue*100) : 0;
+    const seg = document.createElement('div');
+    seg.style.width = pct + '%';
+    seg.style.background = COLORS[i % COLORS.length];
+    seg.title = rep + ": " + fmtCurrency(val);
+    meterBar.appendChild(seg);
+
+    const item = document.createElement('div');
+    item.className = 'item';
+    item.innerHTML = `<span class="dot" style="background:${COLORS[i % COLORS.length]}"></span>${rep} · ${fmtCurrency(val)}`;
+    legend.appendChild(item);
+  });
+  if(!repEntries.length){
+    meterBar.innerHTML = '<div style="width:100%;background:var(--surface-2)"></div>';
+  }
+
+  // Table
+  const wrap = document.getElementById('tableWrap');
+  if(!filtered.length){
+    wrap.innerHTML = `<div class="empty-state">
+      <div class="icon">📋</div>
+      <strong>No quotations yet</strong>
+      <p>Upload an Excel sheet with columns for sales rep, company, product, value, PAM and date — or add a row manually.</p>
+    </div>`;
+    return;
+  }
+
+  if(sortKey){
+    filtered.sort((a,b) => {
+      let av = a[sortKey], bv = b[sortKey];
+      if(sortKey === 'value'){ av = Number(av)||0; bv = Number(bv)||0; }
+      if(av < bv) return -1 * sortDir;
+      if(av > bv) return 1 * sortDir;
+      return 0;
+    });
+  }
+  const arrow = (key) => sortKey === key ? (sortDir === 1 ? ' ▲' : ' ▼') : '';
+
+  let html = `<table><thead><tr>
+    <th>Sales rep</th><th>Company</th><th>Product</th>
+    <th style="cursor:pointer" onclick="toggleSort('value')">Value${arrow('value')}</th>
+    <th>PAM</th>
+    <th style="cursor:pointer" onclick="toggleSort('date')">Date${arrow('date')}</th>
+    <th>Status</th><th>Reason / Note</th><th></th>
+  </tr></thead><tbody>`;
+  const today = new Date();
+  filtered.forEach((r) => {
+    const rowIndex = rows.indexOf(r);
+    const status = r.status || "Pending";
+    let overdueFlag = '';
+    if(status === 'Pending' && r.date){
+      const d = new Date(r.date);
+      const daysOld = (today - d) / (1000*60*60*24);
+      if(daysOld > 14) overdueFlag = ' <span style="color:var(--red);font-family:var(--font-mono);font-size:10.5px;" title="Pending 14+ days">⚠ overdue</span>';
+    }
+    html += `<tr>
+      <td>${escapeHtml(r.rep||'')}</td>
+      <td>${escapeHtml(r.company||'')}</td>
+      <td>${escapeHtml(r.product||'')}</td>
+      <td class="value-cell">${fmtCurrency(r.value)}</td>
+      <td>${escapeHtml(r.pam||'')}</td>
+      <td>${escapeHtml(r.date||'')}${overdueFlag}</td>
+      <td>
+        <select class="status-filter" style="padding:5px 8px;font-size:11.5px" onchange="updateStatus(${rowIndex}, this.value)">
+          ${STATUS_OPTIONS.map(s => `<option value="${s}" ${s===status?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td class="note-cell">${escapeHtml(r.note||'')}</td>
+      <td class="actions">
+        <button onclick="editRow(${rowIndex})" title="Edit">✎</button>
+        <button onclick="deleteRow(${rowIndex})" title="Delete">✕</button>
+      </td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+let sortKey = null; // 'value' | 'date' | null
+let sortDir = 1;
+function toggleSort(key){
+  if(sortKey === key){ sortDir = -sortDir; } else { sortKey = key; sortDir = 1; }
+  render();
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function deleteRow(i){
+  if(!confirm('Delete this quotation? This cannot be undone.')) return;
+  const row = rows[i];
+  if(!row) return;
+  const { error } = await supabaseClient.from('quotations').delete().eq('id', row.id);
+  if(error){ alert('Could not delete: ' + error.message); return; }
+  await fetchRows();
+  await refreshCompanyTotal();
+  render();
+}
+
+let editingIndex = null;
+
+function editRow(i){
+  const r = rows[i];
+  if(!r) return;
+  editingIndex = i;
+  document.getElementById('in_rep').value = r.rep || '';
+  document.getElementById('in_company').value = r.company || '';
+  document.getElementById('in_product').value = r.product || '';
+  document.getElementById('in_value').value = r.value || '';
+  document.getElementById('in_pam').value = r.pam || '';
+  document.getElementById('in_date').value = r.date || '';
+  document.getElementById('in_status').value = r.status || 'Pending';
+  document.getElementById('in_note').value = r.note || '';
+  document.getElementById('saveRowBtn').textContent = 'Save changes';
+  addRowForm.classList.add('show');
+  applyRepLock();
+  window.scrollTo({ top: addRowForm.getBoundingClientRect().top + window.scrollY - 100, behavior:'smooth' });
+}
+
+function resetRowForm(){
+  editingIndex = null;
+  ['in_rep','in_company','in_product','in_value','in_pam','in_date','in_note'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('in_status').value = 'Pending';
+  document.getElementById('saveRowBtn').textContent = 'Add';
+  addRowForm.classList.remove('show');
+  applyRepLock();
+}
+
+document.getElementById('searchBox').addEventListener('input', render);
+
+/* ===================== ADD / EDIT ROW ===================== */
+const addRowBtn = document.getElementById('addRowBtn');
+const addRowForm = document.getElementById('addRowForm');
+addRowBtn.addEventListener('click', () => {
+  if(addRowForm.classList.contains('show') && editingIndex === null){
+    addRowForm.classList.remove('show');
+  } else {
+    resetRowForm();
+    addRowForm.classList.add('show');
+  }
+});
+document.getElementById('cancelRowBtn').addEventListener('click', resetRowForm);
+
+// Lock the "Sales rep" field to the logged-in member's own name so they
+// cannot log or reassign quotations under someone else's name.
+function applyRepLock(){
+  const repInput = document.getElementById('in_rep');
+  if(currentAccount && currentAccount.role === 'member'){
+    repInput.value = currentAccount.repName || '';
+    repInput.disabled = true;
+  } else {
+    repInput.disabled = false;
+  }
+}
+
+document.getElementById('saveRowBtn').addEventListener('click', async () => {
+  const rep = document.getElementById('in_rep').value.trim();
+  const company = document.getElementById('in_company').value.trim();
+  const product = document.getElementById('in_product').value.trim();
+  const value = document.getElementById('in_value').value;
+  const pam = document.getElementById('in_pam').value.trim();
+  const date = document.getElementById('in_date').value;
+  const status = document.getElementById('in_status').value || "Pending";
+  const note = document.getElementById('in_note').value.trim();
+  if(!company && !product){ return; }
+
+  const payload = { rep, company, product, value: Number(value)||0, pam, quote_date: date || null, status, note };
+
+  if(editingIndex !== null && rows[editingIndex]){
+    const { error } = await supabaseClient.from('quotations').update(payload).eq('id', rows[editingIndex].id);
+    if(error){ alert('Could not save changes: ' + error.message); return; }
+  } else {
+    const { error } = await supabaseClient.from('quotations').insert(payload);
+    if(error){ alert('Could not add row: ' + error.message); return; }
+  }
+
+  resetRowForm();
+  await fetchRows();
+  await refreshCompanyTotal();
+  render();
+});
+
+async function updateStatus(i, newStatus){
+  const row = rows[i];
+  if(!row) return;
+  const { error } = await supabaseClient.from('quotations').update({ status: newStatus }).eq('id', row.id);
+  if(error){ alert('Could not update status: ' + error.message); return; }
+  row.status = newStatus;
+  render();
+}
+
+/* ===================== EXCEL UPLOAD (admin only, adds new rows) ===================== */
+const uploadBtn = document.getElementById('uploadBtn');
+const fileInput = document.getElementById('fileInput');
+uploadBtn.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', (e) => {
+  if(!currentAccount || currentAccount.role !== 'admin'){
+    alert('Only admin accounts can bulk-upload an Excel sheet.');
+    fileInput.value = '';
+    return;
+  }
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = async (evt) => {
+    try{
+      const data = new Uint8Array(evt.target.result);
+      const wb = XLSX.read(data, { type:'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(sheet, { defval:"" });
+      const mapped = json.map(row => mapRow(row));
+      const payload = mapped.map(m => ({
+        rep: m.rep, company: m.company, product: m.product,
+        value: m.value, pam: m.pam, quote_date: m.date || null,
+        status: m.status, note: m.note
+      }));
+      if(!payload.length){ alert('No rows found in that file.'); return; }
+      const { error } = await supabaseClient.from('quotations').insert(payload);
+      if(error){ alert('Upload failed: ' + error.message); return; }
+      await fetchRows();
+      await refreshCompanyTotal();
+      render();
+      alert(`Added ${payload.length} quotation(s) from the sheet.`);
+    }catch(err){
+      alert('Could not read this file. Make sure it is a valid Excel (.xlsx) or CSV file.');
+      console.error(err);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  fileInput.value = '';
+});
+
+// Flexible column matching so different header names/orders still work
+function mapRow(row){
+  const keys = Object.keys(row);
+  const find = (aliases) => {
+    const k = keys.find(k => aliases.includes(k.toString().trim().toLowerCase()));
+    return k !== undefined ? row[k] : "";
+  };
+  let dateVal = find(['date','quote date','quotation date']);
+  if(dateVal instanceof Date){
+    dateVal = dateVal.toISOString().slice(0,10);
+  } else if(typeof dateVal === 'number'){
+    // Excel serial date
+    const d = XLSX.SSF.parse_date_code(dateVal);
+    if(d) dateVal = `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+  }
+  let statusVal = find(['status','quotation status','po status','confirmed','confirmation']).toString().trim();
+  const normalizedStatus = normalizeStatus(statusVal);
+  return {
+    rep: find(['sales rep','rep','salesperson','sales person','who did the quotation','quotation by']),
+    company: find(['company','client','client company','account']),
+    product: find(['product','item','vendor product']),
+    value: Number(find(['value','amount','quote value','quotation value','total value'])) || 0,
+    pam: find(['pam','partner account manager','account manager']),
+    date: dateVal || "",
+    status: normalizedStatus,
+    note: find(['note','notes','reason','cancellation reason','remarks','comment'])
+  };
+}
+
+// Map free-text status values from an uploaded sheet onto our fixed status list
+function normalizeStatus(val){
+  if(!val) return "Pending";
+  const v = val.toString().trim().toLowerCase();
+  if(['cancelled','canceled','cancel','lost'].includes(v)) return "Cancelled";
+  if(['po received','po','has po','po in hand','received po'].includes(v)) return "PO Received";
+  if(['confirmed','yes','won','approved'].includes(v)) return "Confirmed";
+  if(['not confirmed','no','unconfirmed','rejected','not yet','no confirm'].includes(v)) return "Pending";
+  if(['pending','in progress','awaiting','follow up','followup','quoted','open','new'].includes(v)) return "Pending";
+  return "Pending";
+}
+
+/* ===================== EXCEL EXPORT (exports whatever this account can see) ===================== */
+document.getElementById('exportBtn').addEventListener('click', () => {
+  const exportData = rows.map(r => ({
+    "Sales Rep": r.rep,
+    "Company": r.company,
+    "Product": r.product,
+    "Value (SAR)": r.value,
+    "PAM": r.pam,
+    "Date": r.date,
+    "Status": r.status || "Pending",
+    "Note": r.note || ""
+  }));
+  const ws = XLSX.utils.json_to_sheet(exportData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Quotations");
+  const today = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `client-ledger-${today}.xlsx`);
+});
+</script>
+</body>
+</html>

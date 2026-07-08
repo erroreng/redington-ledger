@@ -1,0 +1,9 @@
+{
+  "name": "redington-client-ledger",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Redington client & quotation ledger with Supabase backend",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}
