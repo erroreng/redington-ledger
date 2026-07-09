@@ -78,3 +78,26 @@ live Supabase project from this side — I don't have a way to run a real
 deployment from here. Walk through the steps above, and if anything throws
 an error (in the browser console, or from Supabase/Vercel), paste it back to
 me and I'll fix it.
+
+## Troubleshooting (bugs found and fixed while testing this live)
+
+**"relation public.profiles does not exist"**
+`supabase-schema.sql` wasn't run (or didn't finish) before the manual admin insert. Run the whole schema file first, confirm `profiles` and `quotations` both appear in Table Editor, then do the admin insert.
+
+**"Invalid path specified in request URL" on sign-in**
+`SUPABASE_URL` in `index.html` had something appended to it (like `/rest/v1/`). It must be exactly `https://xxxxxxxxxxxx.supabase.co` with nothing after `.supabase.co`.
+
+**"Signed in, but no profile is set up for this account yet"**
+The signed-in auth user has no matching row in `profiles`, usually from a UUID copy/paste mismatch. Fixed for good by using the email-lookup insert above instead of pasting a UUID by hand.
+
+**"infinite recursion detected in policy" (shows up as login/profile errors that don't make sense given correct data)**
+The very first version of this schema had a policy on `profiles` that queried `profiles` to check "is this an admin?" — which recurses into itself. **Already fixed in this version of `supabase-schema.sql`** with the `is_admin()` / `my_rep_name()` helper functions. If your project was set up before this fix, see the "MIGRATING AN EXISTING PROJECT" note at the bottom of `supabase-schema.sql`.
+
+**"Could not create account: Invalid or expired session"**
+Almost always means `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` were added (or fixed) in Vercel's Environment Variables **after** the last deploy — Vercel only picks up env var changes on the *next* deploy. After changing them, go to Vercel → Deployments → (latest) → **Redeploy**.
+
+**Excel upload fails with "ECMA-376 Encrypted file missing /EncryptionInfo"**
+The uploaded file is password-protected. Open it in Excel → File → Info → Protect Workbook → Encrypt with Password → clear the password → save, then re-upload (or save it as a plain `.csv` instead). The dashboard now detects this specific error and shows a clear message instead of a generic one.
+
+**Excel upload silently produces wrong numbers / blank rows**
+Hardened in this version: values with currency symbols or thousands separators (e.g. `SAR 42,000`) now parse correctly, and fully blank rows are skipped automatically instead of being inserted as empty quotations.

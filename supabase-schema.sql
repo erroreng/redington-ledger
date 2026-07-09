@@ -1,5 +1,5 @@
 -- ============================================================
--- Redington Client Ledger — Supabase schema
+-- Redington Client Ledger — Supabase schema (v2, recursion-safe)
 -- Run this once in: Supabase project → SQL Editor → New query → Run
 -- ============================================================
 
@@ -20,6 +20,35 @@ create table if not exists public.profiles (
 
 alter table public.profiles enable row level security;
 
+-- ---------- HELPER FUNCTIONS ----------
+-- These run with the function owner's privileges (security definer), which
+-- lets them check a user's role/rep_name WITHOUT that check itself being
+-- subject to profiles' own RLS policies. Without this, a policy on
+-- `profiles` that queries `profiles` to check "is this user an admin?"
+-- recurses into itself and every query on the table fails with
+-- "infinite recursion detected in policy" — these functions are what
+-- avoid that.
+create or replace function public.is_admin(uid uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists(select 1 from public.profiles where id = uid and role = 'admin');
+$$;
+
+create or replace function public.my_rep_name(uid uuid)
+returns text
+language sql
+security definer
+set search_path = public
+as $$
+  select rep_name from public.profiles where id = uid and role = 'member';
+$$;
+
+grant execute on function public.is_admin(uuid) to authenticated;
+grant execute on function public.my_rep_name(uuid) to authenticated;
+
 -- A user can always read their own profile (needed right after login).
 create policy "users can read own profile"
   on public.profiles for select
@@ -28,9 +57,7 @@ create policy "users can read own profile"
 -- Admins can read every profile (needed for the "Manage team" list).
 create policy "admins can read all profiles"
   on public.profiles for select
-  using (
-    exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
-  );
+  using (public.is_admin(auth.uid()));
 
 -- No insert/update/delete policies here on purpose — profiles are only ever
 -- created/removed by the /api/create-user and /api/delete-user serverless
@@ -57,54 +84,39 @@ alter table public.quotations enable row level security;
 -- SELECT: admins see every row; members see only rows where rep = their linked rep_name.
 create policy "admins can select all quotations"
   on public.quotations for select
-  using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+  using (public.is_admin(auth.uid()));
 
 create policy "members can select own quotations"
   on public.quotations for select
-  using (exists (
-    select 1 from public.profiles p
-    where p.id = auth.uid() and p.role = 'member' and p.rep_name = quotations.rep
-  ));
+  using (public.my_rep_name(auth.uid()) = rep);
 
 -- INSERT: admins can insert any row; members can only insert rows attributed to themselves.
 create policy "admins can insert quotations"
   on public.quotations for insert
-  with check (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+  with check (public.is_admin(auth.uid()));
 
 create policy "members can insert own quotations"
   on public.quotations for insert
-  with check (exists (
-    select 1 from public.profiles p
-    where p.id = auth.uid() and p.role = 'member' and p.rep_name = quotations.rep
-  ));
+  with check (public.my_rep_name(auth.uid()) = rep);
 
 -- UPDATE: same shape as insert.
 create policy "admins can update quotations"
   on public.quotations for update
-  using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+  using (public.is_admin(auth.uid()));
 
 create policy "members can update own quotations"
   on public.quotations for update
-  using (exists (
-    select 1 from public.profiles p
-    where p.id = auth.uid() and p.role = 'member' and p.rep_name = quotations.rep
-  ))
-  with check (exists (
-    select 1 from public.profiles p
-    where p.id = auth.uid() and p.role = 'member' and p.rep_name = quotations.rep
-  ));
+  using (public.my_rep_name(auth.uid()) = rep)
+  with check (public.my_rep_name(auth.uid()) = rep);
 
 -- DELETE: same shape again.
 create policy "admins can delete quotations"
   on public.quotations for delete
-  using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+  using (public.is_admin(auth.uid()));
 
 create policy "members can delete own quotations"
   on public.quotations for delete
-  using (exists (
-    select 1 from public.profiles p
-    where p.id = auth.uid() and p.role = 'member' and p.rep_name = quotations.rep
-  ));
+  using (public.my_rep_name(auth.uid()) = rep);
 
 -- Keep updated_at fresh on every edit.
 create or replace function public.set_updated_at()
@@ -144,9 +156,29 @@ grant execute on function public.total_pipeline_value() to authenticated;
 -- After running this file, create the first admin manually:
 -- 1) Authentication → Users → Add user → enter an email + password,
 --    tick "Auto Confirm User".
--- 2) Copy the new user's UUID.
--- 3) Run this, replacing the values:
+-- 2) Run this (safe to re-run; it looks up the id by email itself,
+--    so there's no UUID to copy/paste and get wrong):
 --
 -- insert into public.profiles (id, name, email, role, rep_name)
--- values ('PASTE-USER-UUID-HERE', 'Admin', 'admin@redington.com', 'admin', null);
+-- select id, 'Admin', email, 'admin', null
+-- from auth.users
+-- where email = 'PASTE-THE-ADMIN-EMAIL-HERE'
+-- on conflict (id) do update set role = 'admin', name = 'Admin', rep_name = null;
+-- ============================================================
+
+-- ============================================================
+-- MIGRATING AN EXISTING PROJECT that was set up with the original
+-- (recursive) version of this file: if re-running this whole file gives
+-- "policy already exists" errors, run this cleanup block first, then
+-- run the rest of the file again:
+--
+-- drop policy if exists "admins can read all profiles" on public.profiles;
+-- drop policy if exists "admins can select all quotations" on public.quotations;
+-- drop policy if exists "members can select own quotations" on public.quotations;
+-- drop policy if exists "admins can insert quotations" on public.quotations;
+-- drop policy if exists "members can insert own quotations" on public.quotations;
+-- drop policy if exists "admins can update quotations" on public.quotations;
+-- drop policy if exists "members can update own quotations" on public.quotations;
+-- drop policy if exists "admins can delete quotations" on public.quotations;
+-- drop policy if exists "members can delete own quotations" on public.quotations;
 -- ============================================================

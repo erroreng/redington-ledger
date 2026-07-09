@@ -430,8 +430,8 @@
 // The anon key is safe to expose in client-side code — it only ever
 // works within the limits of the Row Level Security policies in
 // supabase-schema.sql.
-const SUPABASE_URL = "https://oiqnkyjlkidcafqsoyfc.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pcW5reWpsa2lkY2FmcXNveWZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM0OTg3MzMsImV4cCI6MjA5OTA3NDczM30.0oArElrqQ3XgiAqe7Eame1aqxbbHHvyh-1lMiBgzgtM";
+const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-ANON-PUBLIC-KEY";
 
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -972,29 +972,69 @@ fileInput.addEventListener('change', (e) => {
   reader.onload = async (evt) => {
     try{
       const data = new Uint8Array(evt.target.result);
-      const wb = XLSX.read(data, { type:'array' });
+      let wb;
+      try{
+        wb = XLSX.read(data, { type:'array' });
+      }catch(readErr){
+        const msg = (readErr && readErr.message) || '';
+        if(msg.includes('Encrypted') || msg.includes('EncryptionInfo')){
+          alert('This file is password-protected. Open it in Excel, remove the password (File → Info → Protect Workbook → Encrypt with Password → clear it), save, and upload it again — or save it as a plain CSV instead.');
+        } else {
+          alert('Could not read this file. Make sure it is a valid, non-corrupted Excel (.xlsx) or CSV file.');
+        }
+        console.error(readErr);
+        fileInput.value = '';
+        return;
+      }
+
+      if(!wb.SheetNames || !wb.SheetNames.length){
+        alert('This file has no sheets to read.');
+        fileInput.value = '';
+        return;
+      }
+
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json(sheet, { defval:"" });
-      const mapped = json.map(row => mapRow(row));
+
+      if(!json.length){
+        alert('No rows found on the first sheet. Make sure the first row has column headers and there is at least one data row below it.');
+        fileInput.value = '';
+        return;
+      }
+
+      const mapped = json.map(row => mapRow(row))
+        .filter(m => m.company || m.product); // drop fully blank rows
+
+      if(!mapped.length){
+        alert('Found rows, but none had a company or product value in them — nothing to add. Check that your column headers match (Sales Rep, Company, Product, Value, PAM, Date, Status, Note).');
+        fileInput.value = '';
+        return;
+      }
+
       const payload = mapped.map(m => ({
         rep: m.rep, company: m.company, product: m.product,
         value: m.value, pam: m.pam, quote_date: m.date || null,
         status: m.status, note: m.note
       }));
-      if(!payload.length){ alert('No rows found in that file.'); return; }
+
       const { error } = await supabaseClient.from('quotations').insert(payload);
-      if(error){ alert('Upload failed: ' + error.message); return; }
+      if(error){ alert('Upload failed: ' + error.message); fileInput.value = ''; return; }
       await fetchRows();
       await refreshCompanyTotal();
       render();
-      alert(`Added ${payload.length} quotation(s) from the sheet.`);
+      const skipped = json.length - mapped.length;
+      alert(`Added ${payload.length} quotation(s) from the sheet.` + (skipped ? ` (${skipped} blank row(s) skipped.)` : ''));
     }catch(err){
       alert('Could not read this file. Make sure it is a valid Excel (.xlsx) or CSV file.');
       console.error(err);
     }
+    fileInput.value = '';
+  };
+  reader.onerror = () => {
+    alert('Could not read this file from disk. Try re-saving it and uploading again.');
+    fileInput.value = '';
   };
   reader.readAsArrayBuffer(file);
-  fileInput.value = '';
 });
 
 // Flexible column matching so different header names/orders still work
@@ -1004,6 +1044,18 @@ function mapRow(row){
     const k = keys.find(k => aliases.includes(k.toString().trim().toLowerCase()));
     return k !== undefined ? row[k] : "";
   };
+  const cleanText = (v) => v === undefined || v === null ? "" : v.toString().trim();
+
+  // Strip currency symbols / thousands separators before parsing numbers
+  // (handles "SAR 42,000", "42.000,50", " 42000 ", etc.)
+  const parseNumber = (v) => {
+    if(typeof v === 'number') return v;
+    if(!v) return 0;
+    const cleaned = v.toString().replace(/[^0-9.\-]/g, '');
+    const n = Number(cleaned);
+    return isNaN(n) ? 0 : n;
+  };
+
   let dateVal = find(['date','quote date','quotation date']);
   if(dateVal instanceof Date){
     dateVal = dateVal.toISOString().slice(0,10);
@@ -1011,18 +1063,22 @@ function mapRow(row){
     // Excel serial date
     const d = XLSX.SSF.parse_date_code(dateVal);
     if(d) dateVal = `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+    else dateVal = "";
+  } else {
+    dateVal = cleanText(dateVal);
   }
-  let statusVal = find(['status','quotation status','po status','confirmed','confirmation']).toString().trim();
+
+  let statusVal = cleanText(find(['status','quotation status','po status','confirmed','confirmation']));
   const normalizedStatus = normalizeStatus(statusVal);
   return {
-    rep: find(['sales rep','rep','salesperson','sales person','who did the quotation','quotation by']),
-    company: find(['company','client','client company','account']),
-    product: find(['product','item','vendor product']),
-    value: Number(find(['value','amount','quote value','quotation value','total value'])) || 0,
-    pam: find(['pam','partner account manager','account manager']),
+    rep: cleanText(find(['sales rep','rep','salesperson','sales person','who did the quotation','quotation by'])),
+    company: cleanText(find(['company','client','client company','account'])),
+    product: cleanText(find(['product','item','vendor product'])),
+    value: parseNumber(find(['value','amount','quote value','quotation value','total value'])),
+    pam: cleanText(find(['pam','partner account manager','account manager'])),
     date: dateVal || "",
     status: normalizedStatus,
-    note: find(['note','notes','reason','cancellation reason','remarks','comment'])
+    note: cleanText(find(['note','notes','reason','cancellation reason','remarks','comment']))
   };
 }
 
