@@ -196,7 +196,7 @@
   /* Add row form */
   #addRowForm{
     display:none; padding:16px 20px; border-bottom:1px solid var(--line); background:var(--surface-2);
-    grid-template-columns:1.1fr 1fr 1fr 0.8fr 1fr 0.8fr 0.9fr 1fr auto; gap:10px; align-items:end;
+    grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; align-items:end;
   }
   #addRowForm.show{ display:grid; }
   #addRowForm .f{ display:flex; flex-direction:column; gap:5px; }
@@ -373,7 +373,8 @@
       <div id="addRowForm">
         <div class="f"><label>Sales rep</label><input id="in_rep" placeholder="e.g. Abdulrahman"></div>
         <div class="f"><label>Company</label><input id="in_company" placeholder="Client company"></div>
-        <div class="f"><label>Product</label><input id="in_product" placeholder="e.g. Fortinet FG-60F"></div>
+        <div class="f"><label>Client Name</label><input id="in_clientname" placeholder="Contact / client name"></div>
+        <div class="f"><label>Product / Brand</label><input id="in_product" placeholder="e.g. Fortinet FG-60F"></div>
         <div class="f"><label>Value (SAR)</label><input id="in_value" type="number" placeholder="0"></div>
         <div class="f"><label>PAM</label><input id="in_pam" placeholder="Account manager"></div>
         <div class="f"><label>Date</label><input id="in_date" type="date"></div>
@@ -430,8 +431,8 @@
 // The anon key is safe to expose in client-side code — it only ever
 // works within the limits of the Row Level Security policies in
 // supabase-schema.sql.
-const SUPABASE_URL = "https://oiqnkyjlkidcafqsoyfc.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pcW5reWpsa2lkY2FmcXNveWZjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MzQ5ODczMywiZXhwIjoyMDk5MDc0NzMzfQ.Gz6HnwYhjq_PLh83QiRCoFoPLpqCz_bzWkW_wrflrdA";
+const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-ANON-PUBLIC-KEY";
 
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -481,7 +482,7 @@ async function establishSession(session){
   document.getElementById('app').style.display = 'block';
   const isAdmin = currentAccount.role === 'admin';
   document.getElementById('adminBtn').style.display = isAdmin ? 'flex' : 'none';
-  document.getElementById('uploadBtn').style.display = isAdmin ? 'flex' : 'none';
+  document.getElementById('uploadBtn').style.display = 'flex'; // available to admins and members alike
   document.getElementById('repTotalCard').style.display = isAdmin ? 'flex' : 'none';
   document.getElementById('pipelinePanel').style.display = isAdmin ? 'block' : 'none';
   document.getElementById('whoAmI').textContent =
@@ -612,6 +613,7 @@ async function fetchRows(){
     id: r.id,
     rep: r.rep,
     company: r.company,
+    clientName: r.client_name || '',
     product: r.product,
     value: r.value,
     pam: r.pam,
@@ -697,6 +699,7 @@ function render(){
   const filtered = rows.filter(r => {
     const matchesSearch = !search ||
       (r.company||'').toLowerCase().includes(search) ||
+      (r.clientName||'').toLowerCase().includes(search) ||
       (r.product||'').toLowerCase().includes(search) ||
       (r.rep||'').toLowerCase().includes(search) ||
       (r.pam||'').toLowerCase().includes(search) ||
@@ -802,7 +805,7 @@ function render(){
   const arrow = (key) => sortKey === key ? (sortDir === 1 ? ' ▲' : ' ▼') : '';
 
   let html = `<table><thead><tr>
-    <th>Sales rep</th><th>Company</th><th>Product</th>
+    <th>Sales rep</th><th>Company</th><th>Client</th><th>Product / Brand</th>
     <th style="cursor:pointer" onclick="toggleSort('value')">Value${arrow('value')}</th>
     <th>PAM</th>
     <th style="cursor:pointer" onclick="toggleSort('date')">Date${arrow('date')}</th>
@@ -821,6 +824,7 @@ function render(){
     html += `<tr>
       <td>${escapeHtml(r.rep||'')}</td>
       <td>${escapeHtml(r.company||'')}</td>
+      <td>${escapeHtml(r.clientName||'')}</td>
       <td>${escapeHtml(r.product||'')}</td>
       <td class="value-cell">${fmtCurrency(r.value)}</td>
       <td>${escapeHtml(r.pam||'')}</td>
@@ -871,6 +875,7 @@ function editRow(i){
   editingIndex = i;
   document.getElementById('in_rep').value = r.rep || '';
   document.getElementById('in_company').value = r.company || '';
+  document.getElementById('in_clientname').value = r.clientName || '';
   document.getElementById('in_product').value = r.product || '';
   document.getElementById('in_value').value = r.value || '';
   document.getElementById('in_pam').value = r.pam || '';
@@ -885,7 +890,7 @@ function editRow(i){
 
 function resetRowForm(){
   editingIndex = null;
-  ['in_rep','in_company','in_product','in_value','in_pam','in_date','in_note'].forEach(id => document.getElementById(id).value = '');
+  ['in_rep','in_company','in_clientname','in_product','in_value','in_pam','in_date','in_note'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('in_status').value = 'Pending';
   document.getElementById('saveRowBtn').textContent = 'Add';
   addRowForm.classList.remove('show');
@@ -922,6 +927,7 @@ function applyRepLock(){
 document.getElementById('saveRowBtn').addEventListener('click', async () => {
   const rep = document.getElementById('in_rep').value.trim();
   const company = document.getElementById('in_company').value.trim();
+  const clientName = document.getElementById('in_clientname').value.trim();
   const product = document.getElementById('in_product').value.trim();
   const value = document.getElementById('in_value').value;
   const pam = document.getElementById('in_pam').value.trim();
@@ -930,7 +936,7 @@ document.getElementById('saveRowBtn').addEventListener('click', async () => {
   const note = document.getElementById('in_note').value.trim();
   if(!company && !product){ return; }
 
-  const payload = { rep, company, product, value: Number(value)||0, pam, quote_date: date || null, status, note };
+  const payload = { rep, company, client_name: clientName, product, value: Number(value)||0, pam, quote_date: date || null, status, note };
 
   if(editingIndex !== null && rows[editingIndex]){
     const { error } = await supabaseClient.from('quotations').update(payload).eq('id', rows[editingIndex].id);
@@ -961,8 +967,7 @@ const fileInput = document.getElementById('fileInput');
 uploadBtn.addEventListener('click', () => fileInput.click());
 
 fileInput.addEventListener('change', (e) => {
-  if(!currentAccount || currentAccount.role !== 'admin'){
-    alert('Only admin accounts can bulk-upload an Excel sheet.');
+  if(!currentAccount){
     fileInput.value = '';
     return;
   }
@@ -1006,13 +1011,16 @@ fileInput.addEventListener('change', (e) => {
         .filter(m => m.company || m.product); // drop fully blank rows
 
       if(!mapped.length){
-        alert('Found rows, but none had a company or product value in them — nothing to add. Check that your column headers match (Sales Rep, Company, Product, Value, PAM, Date, Status, Note).');
+        console.log('Column headers found in the uploaded file:', Object.keys(json[0] || {}));
+        alert('Found rows, but none had a company or product value in them — nothing to add. Check that your column headers match one of the supported names (English: Sales Rep, Company, Product, Value, PAM, Date, Status, Note — Arabic: المندوب، الشركة، المنتج، القيمة، بام، التاريخ، الحالة، ملاحظات). Open the browser console (F12) to see exactly what headers this file has.');
         fileInput.value = '';
         return;
       }
 
+      const isMember = currentAccount.role === 'member';
       const payload = mapped.map(m => ({
-        rep: m.rep, company: m.company, product: m.product,
+        rep: isMember ? (currentAccount.repName || '') : m.rep,
+        company: m.company, client_name: m.clientName, product: m.product,
         value: m.value, pam: m.pam, quote_date: m.date || null,
         status: m.status, note: m.note
       }));
@@ -1023,7 +1031,9 @@ fileInput.addEventListener('change', (e) => {
       await refreshCompanyTotal();
       render();
       const skipped = json.length - mapped.length;
-      alert(`Added ${payload.length} quotation(s) from the sheet.` + (skipped ? ` (${skipped} blank row(s) skipped.)` : ''));
+      alert(`Added ${payload.length} quotation(s) from the sheet.` +
+        (skipped ? ` (${skipped} blank row(s) skipped.)` : '') +
+        (isMember ? ` All rows were attributed to you (${currentAccount.repName}), regardless of what was in the sheet's Sales Rep column.` : ''));
     }catch(err){
       alert('Could not read this file. Make sure it is a valid Excel (.xlsx) or CSV file.');
       console.error(err);
@@ -1056,7 +1066,7 @@ function mapRow(row){
     return isNaN(n) ? 0 : n;
   };
 
-  let dateVal = find(['date','quote date','quotation date']);
+  let dateVal = find(['date','quote date','quotation date','التاريخ','تاريخ العرض','تاريخ الكوتيشن']);
   if(dateVal instanceof Date){
     dateVal = dateVal.toISOString().slice(0,10);
   } else if(typeof dateVal === 'number'){
@@ -1068,17 +1078,18 @@ function mapRow(row){
     dateVal = cleanText(dateVal);
   }
 
-  let statusVal = cleanText(find(['status','quotation status','po status','confirmed','confirmation']));
+  let statusVal = cleanText(find(['status','quotation status','po status','confirmed','confirmation','الحالة','حالة الطلب','حالة العرض']));
   const normalizedStatus = normalizeStatus(statusVal);
   return {
-    rep: cleanText(find(['sales rep','rep','salesperson','sales person','who did the quotation','quotation by'])),
-    company: cleanText(find(['company','client','client company','account'])),
-    product: cleanText(find(['product','item','vendor product'])),
-    value: parseNumber(find(['value','amount','quote value','quotation value','total value'])),
-    pam: cleanText(find(['pam','partner account manager','account manager'])),
+    rep: cleanText(find(['sales rep','rep','salesperson','sales person','who did the quotation','quotation by','المندوب','مندوب المبيعات','اسم المندوب','البائع','مندوب'])),
+    company: cleanText(find(['company','client company','account','الشركة','اسم الشركة','الحساب'])),
+    clientName: cleanText(find(['client name','client','customer name','contact name','clientname','العميل','اسم العميل','اسم الزبون'])),
+    product: cleanText(find(['product','item','vendor product','brand','المنتج','الصنف','المنتجات','البند','البراند','الماركة'])),
+    value: parseNumber(find(['value','amount','quote value','quotation value','total value','quote (sar)','quote(sar)','quote','القيمة','المبلغ','قيمة العرض','القيمة الإجمالية','السعر'])),
+    pam: cleanText(find(['pam','partner account manager','account manager','بام','مدير الحساب','مسؤول الحساب'])),
     date: dateVal || "",
     status: normalizedStatus,
-    note: cleanText(find(['note','notes','reason','cancellation reason','remarks','comment']))
+    note: cleanText(find(['note','notes','reason','cancellation reason','remarks','comment','ملاحظات','ملاحظة','السبب','سبب الإلغاء']))
   };
 }
 
@@ -1086,11 +1097,11 @@ function mapRow(row){
 function normalizeStatus(val){
   if(!val) return "Pending";
   const v = val.toString().trim().toLowerCase();
-  if(['cancelled','canceled','cancel','lost'].includes(v)) return "Cancelled";
-  if(['po received','po','has po','po in hand','received po'].includes(v)) return "PO Received";
-  if(['confirmed','yes','won','approved'].includes(v)) return "Confirmed";
-  if(['not confirmed','no','unconfirmed','rejected','not yet','no confirm'].includes(v)) return "Pending";
-  if(['pending','in progress','awaiting','follow up','followup','quoted','open','new'].includes(v)) return "Pending";
+  if(['cancelled','canceled','cancel','lost','ملغي','ملغى','إلغاء','الغاء','منكسل','متنكسل'].includes(v)) return "Cancelled";
+  if(['po received','po','has po','po in hand','received po','استلمنا po','تم استلام po','بي او','استلام الطلب'].includes(v)) return "PO Received";
+  if(['confirmed','yes','won','approved','مؤكد','تم التأكيد','نعم'].includes(v)) return "Confirmed";
+  if(['not confirmed','no','unconfirmed','rejected','not yet','no confirm','غير مؤكد','لا'].includes(v)) return "Pending";
+  if(['pending','in progress','awaiting','follow up','followup','quoted','open','new','معلق','قيد الانتظار','قيد المتابعة','بانتظار الرد'].includes(v)) return "Pending";
   return "Pending";
 }
 
@@ -1099,6 +1110,7 @@ document.getElementById('exportBtn').addEventListener('click', () => {
   const exportData = rows.map(r => ({
     "Sales Rep": r.rep,
     "Company": r.company,
+    "Client Name": r.clientName || "",
     "Product": r.product,
     "Value (SAR)": r.value,
     "PAM": r.pam,

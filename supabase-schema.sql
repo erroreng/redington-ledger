@@ -69,6 +69,7 @@ create table if not exists public.quotations (
   id uuid primary key default uuid_generate_v4(),
   rep text not null,
   company text not null,
+  client_name text,
   product text,
   value numeric default 0,
   pam text,
@@ -164,6 +165,13 @@ grant execute on function public.total_pipeline_value() to authenticated;
 -- from auth.users
 -- where email = 'PASTE-THE-ADMIN-EMAIL-HERE'
 -- on conflict (id) do update set role = 'admin', name = 'Admin', rep_name = null;
+-- ============================================================
+
+-- ============================================================
+-- MIGRATING AN EXISTING PROJECT that already has a `quotations` table
+-- from before the `client_name` column existed — run this once:
+--
+-- alter table public.quotations add column if not exists client_name text;
 -- ============================================================
 
 -- ============================================================
